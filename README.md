@@ -4,7 +4,7 @@
 
 ## Introduction
 
-This repository contains the implementation of the paper, *Dynamic Perceiver for Efficient Visual Recognition*. The proposed **Dynamic Perceiver (Dyn-Perceiver)** decouples the feature extraction procedure and the early classification task with a novel two-branch architecture, which significantly improves model performance in the dynamic early exiting scenario. 
+This repository contains the implementation of the ICCV 2023 paper, [*Dynamic Perceiver for Efficient Visual Recognition*](https://arxiv.org/abs/2306.11248). The proposed **Dynamic Perceiver (Dyn-Perceiver)** decouples the feature extraction procedure and the early classification task with a novel two-branch architecture, which significantly improves model performance in the dynamic early exiting scenario. 
 
 ### Overall idea
 
