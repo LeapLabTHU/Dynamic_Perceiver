@@ -25,7 +25,7 @@ from .cnn_core.resnet import *
 class DynPerceiver(nn.Module):
     def __init__(self,
                 input_size: int=224,
-                num_classes:int=1000,
+                num_classes:int=100,
                 cnn_arch: str="resnet18",
                 num_SA_heads: list=[1,2,4,8],
                 num_latents: int=32,
@@ -54,7 +54,7 @@ class DynPerceiver(nn.Module):
             num_SA_heads = [1,2,4,8]
         self.num_classes = num_classes
         cnn = eval(f'{cnn_arch}')(drop_rate=drop_rate,
-                                  drop_path_rate=drop_path_rate)
+                                  drop_path_rate=drop_path_rate, num_classes=num_classes)
         self.cnn_stem = nn.Sequential(
             cnn.conv1,
             cnn.bn1,
@@ -634,11 +634,11 @@ def resnet50_075_perceiver_t256(**kwargs):
     return model
 
 
-def dyn_flops():
+def dyn_flops(model):
     x = torch.rand(1, 3, 224, 224)
     result = []
     for i in range(4,5):
-        model = resnet50_0375_perceiver_t256(
+        model = resnet18_perceiver_t128(
             depth_factor=[1,1,1,1], SA_widening_factor=4, spatial_reduction=True,
             with_last_CA=True, with_x2z=True, with_dwc=True, with_z2x=True, exit=i)
         model.eval()
