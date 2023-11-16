@@ -106,10 +106,10 @@ class DynPerceiver(nn.Module):
         if num_latent_channels is None:
             num_latent_channels = x_channels_stage1in
         self.latent = nn.Parameter(torch.empty(num_latents, num_latent_channels))
-
-        self.with_x2z = with_x2z
-        self.with_z2x = with_z2x
-        self.with_dwc = with_dwc
+        # there are 2 cross attentions from x to z and from z to x.
+        self.with_x2z = with_x2z # pass info from x (feature branch) to the classification branch (z)
+        self.with_z2x = with_z2x # the other way
+        self.with_dwc = with_dwc # depth wise convolution to enhance local feature extraction.
         
         if with_dwc:
             self.dwc1_x2z = nn.Conv2d(in_channels=x_channels_stage1in, out_channels=x_channels_stage1in, kernel_size=7, 
@@ -139,6 +139,7 @@ class DynPerceiver(nn.Module):
         # stage2
         if with_x2z:
             if with_dwc:
+                # Feed the input of stage 2 convolution
                 self.dwc2_x2z = nn.Conv2d(in_channels=x_channels_stage2in, out_channels=x_channels_stage2in, kernel_size=7, groups=x_channels_stage2in, stride=1, padding=3)
             feat_hw = 7 if spatial_reduction else input_size//4
             self.cross_att2_x2z = cross_attn(num_cross_attention_heads=1,
@@ -153,7 +154,7 @@ class DynPerceiver(nn.Module):
                                         feat_h=feat_hw,
             )
 
-        if with_z2x:
+        if with_z2x: # cross attention at stage 2
             self.cross_att2_z2x = cross_attn(num_cross_attention_heads=1,
                                         q_input_channels=x_channels_stage2in,
                                         kv_input_channels=x_channels_stage2in,                     
@@ -172,6 +173,7 @@ class DynPerceiver(nn.Module):
         # stage3
         if with_x2z:
             if with_dwc:
+                # feed the the convolutions
                 self.dwc3_x2z = nn.Conv2d(in_channels=x_channels_stage3in, out_channels=x_channels_stage3in, kernel_size=7, groups=x_channels_stage3in, stride=1, padding=3)
             feat_hw = 7 if spatial_reduction else input_size//8
             self.cross_att3_x2z = cross_attn(num_cross_attention_heads=1,
@@ -253,12 +255,14 @@ class DynPerceiver(nn.Module):
         # print(x_channels_stage1in, x_channels_stage2in, x_channels_stage3in, x_channels_stage4in)
         # self.early_classifier1 = nn.Linear(x_channels_stage1in, num_classes)
         # self.early_classifier2 = nn.Linear(x_channels_stage2in, num_classes)
-        
-        self.early_classifier3 = nn.Linear(x_channels_stage3in, num_classes)
+
+        # CLASSIFIERS
+        self.early_classifier3 = nn.Linear(x_channels_stage3in, num_classes) # early classifier at branch 3
+        # takes feature from third stage.
         self.with_isc = with_isc
         
         if not with_isc:    
-            self.classifier_att = nn.Linear(x_channels_stage4in, num_classes)
+            self.classifier_att = nn.Linear(x_channels_stage4in, num_classes) # at branch 4, after attention
             
             self.classifier_cnn = nn.Sequential(
                                     nn.Linear(cnn.lastconv_output_channels, cnn.last_channel),
@@ -276,7 +280,7 @@ class DynPerceiver(nn.Module):
                                             nn.Linear(cnn.last_channel, num_classes),
             )
             self.classifier_merge_flops = (cnn.lastconv_output_channels+x_channels_stage4in) * cnn.last_channel + cnn.last_channel * num_classes
-        else:
+        else: # with_isc
             
             self.isc3 = nn.Sequential(nn.Linear(num_classes, x_channels_stage4in),
                                     nn.BatchNorm1d(x_channels_stage4in),
@@ -432,7 +436,7 @@ class DynPerceiver(nn.Module):
         # stage3
         x_latent = self.self_att3(x_latent)
         y_early3 = torch.mean(x_latent, dim=1).squeeze(1)
-        y_early3 = self.early_classifier3(y_early3)
+        y_early3 = self.early_classifier3(y_early3) # EXIT 3
 
         for j in range(len(self.cnn_body_stage3)):
             x = self.cnn_body_stage3[j](x)
@@ -470,7 +474,7 @@ class DynPerceiver(nn.Module):
         if self.with_isc:
             y3_ = self.isc3(y_early3)
             y_att = torch.cat((x_latent_mean, y3_), dim=1)
-            y_att = self.classifier_att(y_att)
+            y_att = self.classifier_att(y_att) # EXIT ATT
         else:
             y_att = self.classifier_att(x_latent_mean)
 
@@ -480,7 +484,7 @@ class DynPerceiver(nn.Module):
 
         x_mean = self.avgpool(x)
         x_mean = x_mean.flatten(start_dim=1)
-        y_cnn = self.classifier_cnn(x_mean)
+        y_cnn = self.classifier_cnn(x_mean) # EXIT CNN
 
 
         # cross attention from z to x

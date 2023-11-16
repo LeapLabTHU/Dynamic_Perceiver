@@ -25,12 +25,18 @@ from timm.models import create_model
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from timm.utils import ModelEma
 from optim_factory import create_optimizer, LayerDecayValueAssigner
+from models.jeidnn.dynn_wrapper import DynnWrapper, TrainingPhase
+from models.jeidnn.learning_helper import LearningHelper
+from models.jeidnn.log_helper import setup_mlflow
+from models.jeidnn.our_train_helper import train_single_epoch, evaluate
+from models.jeidnn.our_train_helper import set_from_validation
 
 from datasets import build_dataset
 from engine import train_one_epoch_earlyExit, evaluate_earlyExit
 
 from utils import NativeScalerWithGradNormCount as NativeScaler
 import utils
+from models.dyn_perceiver_resnet import compute_flops
 
 import models
 
@@ -229,8 +235,38 @@ def get_args_parser():
                         help='Calculate CKA Similarity only')
     parser.add_argument('--visualize', type=str2bool, default=False,
                         help='To visualize easy and hard samples')
+    # jeidnn args
+    parser.add_argument('--jeidnn', type=str2bool, default=False,
+                        help='Train in jeidnn mode')
+    parser.add_argument('--ce_ic_tradeoff', type=float, default=0.1,
+                        help='lambda')
+    parser.add_argument('--bilevel_epochs', type=int, default=5,
+                        help='epochs for jeidnn training')
 
     return parser
+
+def train_jeidnn(wrapper, args, criterion, data_loader_train, val_loader, optimizer,
+                 device, loss_scaler, model_ema):
+    setup_mlflow(f"jeidnn_{str(args.ce_ic_tradeoff)}_set_from_val", vars(args), "jeidnn_wed")
+    wrapper = wrapper.to(device)
+    parameters = wrapper.parameters()
+    optimizer = torch.optim.SGD(parameters,
+                      lr=0.01,
+                      momentum=0.9,
+                      weight_decay=5e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
+                                                       eta_min=2e-4,
+                                                       T_max=args.bilevel_epochs)
+    criterion_func = torch.nn.CrossEntropyLoss # make this configurable.
+    learning_helper = LearningHelper(wrapper, optimizer, args, device, criterion_func)
+    best_acc = 0
+    for epoch in range(args.bilevel_epochs):
+        train_single_epoch(args, learning_helper, device,
+                           data_loader_train, epoch=epoch, training_phase=TrainingPhase.CLASSIFIER,
+                           bilevel_batch_count=200)
+        val_metrics_dict, new_best_acc, _ = evaluate(best_acc, args, learning_helper, device, val_loader, epoch, mode='val', experiment_name='potato')
+        set_from_validation(learning_helper, val_metrics_dict, account_subsequent=True)
+        scheduler.step()
 
 def main(args):
     utils.init_distributed_mode(args)
@@ -322,6 +358,9 @@ def main(args):
                                          with_last_CA=args.with_last_CA,
                                          with_isc=args.with_isc)
 
+    # from op_counter import measure_model_and_assign_cost_per_exit
+    # measure_model_and_assign_cost_per_exit(model, 224, 224, num_classes=args.nb_classes)
+    # compute_flops(model)
     if args.finetune:
         if args.finetune.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
@@ -442,6 +481,11 @@ def main(args):
     max_accuracy_cnn, max_accuracy_att, max_accuracy_merge, max_accuracy = 0.0, 0.0, 0.0, 0.0
     if args.model_ema and args.model_ema_eval:
         max_accuracy_cnn_ema, max_accuracy_att_ema, max_accuracy_merge_ema, max_accuracy_ema = 0.0, 0.0, 0.0, 0.0
+    if args.jeidnn:
+        print('Starting JEIDNN training')
+        wrapper = DynnWrapper(model, args)
+        return train_jeidnn(wrapper, args, criterion, data_loader_train, data_loader_val, optimizer,
+                            device, loss_scaler, args.clip_grad)
 
     print("Start training for %d epochs" % args.epochs)
     start_time = time.time()

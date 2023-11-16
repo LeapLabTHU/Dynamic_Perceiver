@@ -634,13 +634,13 @@ def resnet50_075_perceiver_t256(**kwargs):
     return model
 
 
-def dyn_flops(model):
+def compute_flops(model):
     x = torch.rand(1, 3, 224, 224)
     result = []
     for i in range(4,5):
-        model = resnet18_perceiver_t128(
-            depth_factor=[1,1,1,1], SA_widening_factor=4, spatial_reduction=True,
-            with_last_CA=True, with_x2z=True, with_dwc=True, with_z2x=True, exit=i)
+        # model = resnet18_perceiver_t128(
+        #     depth_factor=[1,1,1,1], SA_widening_factor=4, spatial_reduction=True,
+        #     with_last_CA=True, with_x2z=True, with_dwc=True, with_z2x=True, exit=i)
         model.eval()
         from fvcore.nn import FlopCountAnalysis
         flops = FlopCountAnalysis(model, x)
@@ -649,11 +649,12 @@ def dyn_flops(model):
     for flop in result:
         print(flop)
     print('***************************')
+    model.train()
 
 
 if __name__ == '__main__':
 
-    dyn_flops()
+    # dyn_flops()
 
     # # Fourier-encodes pixel positions and flatten along spatial dimensions
     # input_adapter = ImageInputAdapter(
